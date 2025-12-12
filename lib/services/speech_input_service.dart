@@ -87,8 +87,8 @@ class SpeechInputService {
         listenMode: ListenMode.dictation,
         cancelOnError: false,
         partialResults: true,
-        pauseFor: const Duration(seconds: 3), // Sluta lyssna efter 3 sek tystnad
-        listenFor: const Duration(seconds: 30), // Max 30 sek total
+        pauseFor: const Duration(seconds: 20), // Sluta lyssna efter 20 sek tystnad
+        listenFor: const Duration(seconds: 60), // Max 60 sek total
       );
       
       return true;

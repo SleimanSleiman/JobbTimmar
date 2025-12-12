@@ -494,7 +494,7 @@ class _AddEntryScreenState extends State<AddEntryScreen> {
                   }
                   final hours =
                       double.tryParse(value.replaceAll(',', '.'));
-                  if (hours == null || hours <= 0) {
+                  if (hours == null || hours < 0) {
                     return 'Ange ett giltigt antal timmar';
                   }
                   if (hours > 24) {
