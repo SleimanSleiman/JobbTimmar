@@ -1,0 +1,44 @@
+name: jobb_timmar
+description: En app för att registrera arbetstimmar och skapa månadsrapporter.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  sqflite: ^2.3.0
+  path: ^1.8.3
+  intl: ^0.20.2
+  pdf: ^3.10.7
+  printing: ^5.11.1
+  cupertino_icons: ^1.0.6
+  http: ^1.2.0
+  url_launcher: ^6.2.1
+  path_provider: ^2.1.1
+  share_plus: ^7.2.1
+  flutter_tts: ^3.8.5
+  speech_to_text: ^7.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#1565C0"
+  adaptive_icon_foreground: "assets/icon.png"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
