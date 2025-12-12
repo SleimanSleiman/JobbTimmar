@@ -23,6 +23,7 @@ class _SmsScreenState extends State<SmsScreen> {
   bool _isListening = false;
   String _listeningLanguage = '';
   GeminiResult? _result;
+  SuggestionResult? _suggestionResult;
   String? _errorMessage;
   String _currentAction = '';
 
@@ -150,32 +151,41 @@ class _SmsScreenState extends State<SmsScreen> {
       _isLoading = true;
       _errorMessage = null;
       _result = null;
+      _suggestionResult = null;
       _currentAction = action;
     });
 
     try {
-      final GeminiResult result;
-      switch (action) {
-        case 'improve':
-          result = await GeminiTextService.improveText(text);
-          break;
-        case 'simplify':
-          result = await GeminiTextService.simplifyText(text);
-          break;
-        case 'toArabic':
-          result = await GeminiTextService.translateToArabic(text);
-          break;
-        case 'toSwedish':
-          result = await GeminiTextService.translateToSwedish(text);
-          break;
-        default:
-          result = await GeminiTextService.improveText(text);
+      if (action == 'suggestions') {
+        final suggestionResult = await GeminiTextService.generateReplySuggestions(text);
+        setState(() {
+          _suggestionResult = suggestionResult;
+          _isLoading = false;
+        });
+      } else {
+        final GeminiResult result;
+        switch (action) {
+          case 'improve':
+            result = await GeminiTextService.improveText(text);
+            break;
+          case 'simplify':
+            result = await GeminiTextService.simplifyText(text);
+            break;
+          case 'toArabic':
+            result = await GeminiTextService.translateToArabic(text);
+            break;
+          case 'toSwedish':
+            result = await GeminiTextService.translateToSwedish(text);
+            break;
+          default:
+            result = await GeminiTextService.improveText(text);
+        }
+        
+        setState(() {
+          _result = result;
+          _isLoading = false;
+        });
       }
-      
-      setState(() {
-        _result = result;
-        _isLoading = false;
-      });
 
       // Scrolla ner till resultatet
       await Future.delayed(const Duration(milliseconds: 100));
@@ -229,6 +239,7 @@ class _SmsScreenState extends State<SmsScreen> {
     setState(() {
       _textController.clear();
       _result = null;
+      _suggestionResult = null;
       _errorMessage = null;
       _currentAction = '';
     });
@@ -244,6 +255,39 @@ class _SmsScreenState extends State<SmsScreen> {
     }
   }
 
+  Future<void> _copySuggestion(String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 12),
+              Expanded(child: Text('Svaret kopierat!')),
+            ],
+          ),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  void _useSuggestion(String text) {
+    _textController.text = text;
+    setState(() {
+      _suggestionResult = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Svaret inlagt - du kan redigera det innan du skickar'),
+        backgroundColor: Colors.teal,
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
   String _getResultTitle() {
     switch (_currentAction) {
       case 'improve':
@@ -254,6 +298,8 @@ class _SmsScreenState extends State<SmsScreen> {
         return 'Arabisk översättning';
       case 'toSwedish':
         return 'Svensk översättning';
+      case 'suggestions':
+        return 'Svarsförslag';
       default:
         return 'Resultat';
     }
@@ -398,6 +444,23 @@ class _SmsScreenState extends State<SmsScreen> {
                     color: Colors.blue.shade600,
                     isLoading: _isLoading && _currentAction == 'toSwedish',
                     onPressed: _isLoading ? null : () => _processText('toSwedish'),
+                  ),
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // Rad 3: Svarsförslag
+            Row(
+              children: [
+                Expanded(
+                  child: _ActionButton(
+                    label: 'Ge svarsförslag',
+                    icon: Icons.lightbulb_outline,
+                    color: Colors.teal.shade600,
+                    isLoading: _isLoading && _currentAction == 'suggestions',
+                    onPressed: _isLoading ? null : () => _processText('suggestions'),
                   ),
                 ),
               ],
@@ -591,6 +654,59 @@ class _SmsScreenState extends State<SmsScreen> {
                   ),
                 ),
               ],
+            ],
+            
+            // Svarsförslag - separata paneler
+            if (_suggestionResult != null && _suggestionResult!.hasSuggestions) ...[
+              Row(
+                children: [
+                  const Icon(Icons.lightbulb, color: Colors.teal, size: 24),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Svarsförslag',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.teal,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 12),
+              
+              // JA-panel
+              if (_suggestionResult!.yesSuggestion.isNotEmpty)
+                _SuggestionPanel(
+                  title: '✅ Om du vill svara JA',
+                  suggestion: _suggestionResult!.yesSuggestion,
+                  color: Colors.green,
+                  onCopy: () => _copySuggestion(_suggestionResult!.yesSuggestion),
+                ),
+              
+              const SizedBox(height: 12),
+              
+              // NEJ-panel
+              if (_suggestionResult!.noSuggestion.isNotEmpty)
+                _SuggestionPanel(
+                  title: '❌ Om du vill svara NEJ',
+                  suggestion: _suggestionResult!.noSuggestion,
+                  color: Colors.red,
+                  onCopy: () => _copySuggestion(_suggestionResult!.noSuggestion),
+                ),
+              
+              const SizedBox(height: 12),
+              
+              // ANNAT-panel
+              if (_suggestionResult!.otherSuggestion.isNotEmpty)
+                _SuggestionPanel(
+                  title: '💬 Annat svar',
+                  suggestion: _suggestionResult!.otherSuggestion,
+                  color: Colors.blue,
+                  onCopy: () => _copySuggestion(_suggestionResult!.otherSuggestion),
+                ),
             ],
             
             // Felmeddelande
@@ -803,6 +919,89 @@ class _ActionButton extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Panel för svarsförslag
+class _SuggestionPanel extends StatelessWidget {
+  final String title;
+  final String suggestion;
+  final Color color;
+  final VoidCallback onCopy;
+
+  const _SuggestionPanel({
+    required this.title,
+    required this.suggestion,
+    required this.color,
+    required this.onCopy,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3), width: 2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Titel
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.2),
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(10),
+                topRight: Radius.circular(10),
+              ),
+            ),
+            child: Text(
+              title,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+          ),
+          // Förslag-text
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: SelectableText(
+              suggestion,
+              style: const TextStyle(
+                fontSize: 17,
+                height: 1.4,
+              ),
+            ),
+          ),
+          // Kopiera-knapp
+          Padding(
+            padding: const EdgeInsets.only(left: 8, right: 8, bottom: 8),
+            child: SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: OutlinedButton.icon(
+                onPressed: onCopy,
+                icon: const Icon(Icons.copy, size: 18),
+                label: const Text('Kopiera', style: TextStyle(fontSize: 13)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: color,
+                  side: BorderSide(color: color),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

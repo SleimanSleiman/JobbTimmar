@@ -55,6 +55,7 @@ $input''';
   }
 
   /// Översätter text från svenska till libanesisk/enkel arabiska
+  /// Först förenklas texten, sedan översätts den
   static Future<GeminiResult> translateToArabic(String input) async {
     if (input.trim().isEmpty) {
       return GeminiResult(
@@ -64,13 +65,16 @@ $input''';
       );
     }
 
-    final prompt = '''Översätt följande svenska text till arabiska.
-Använd enkel, vardaglig arabiska (helst libanesisk dialekt om möjligt).
-Undvik formell/klassisk arabiska - skriv som man pratar.
+    final prompt = '''Du ska göra två saker med följande svenska text:
+1. Först förenkla texten (kortare meningar, enklare ord)
+2. Sedan översätta den förenklade versionen till arabiska
 
-Svara ENDAST med översättningen, ingen förklaring.
+Använd enkel, vardaglig arabiska (libanesisk dialekt om möjligt).
+Undvik formell/klassisk arabiska - skriv som man pratar i vardagen.
 
-Text att översätta:
+Svara ENDAST med den arabiska översättningen, ingen förklaring eller mellansteg.
+
+Text:
 $input''';
 
     return await _sendRequest(input, prompt);
@@ -95,6 +99,74 @@ Text att översätta:
 $input''';
 
     return await _sendRequest(input, prompt);
+  }
+
+  /// Genererar svarsförslag baserat på meddelandet
+  /// Ger ett snällt svar för ja, nej och annat
+  static Future<SuggestionResult> generateReplySuggestions(String input) async {
+    if (input.trim().isEmpty) {
+      return SuggestionResult(
+        originalText: input,
+        yesSuggestion: '',
+        noSuggestion: '',
+        otherSuggestion: '',
+        success: true,
+      );
+    }
+
+    final prompt = '''Analysera följande meddelande och ge ETT svarsförslag för varje kategori.
+Svaren ska vara snälla, varma och vänliga. Använd enkla ord som passar för SMS.
+
+Meddelande:
+$input
+
+Svara i EXAKT detta format (en rad per svar, utan punkter eller bindestreck):
+JA: [ett snällt, positivt ja-svar]
+NEJ: [ett artigt, snällt nej-svar som inte sårar]
+ANNAT: [en vänlig fråga eller alternativt svar]
+
+Exempel på snälla svar:
+JA: Ja, självklart! Det går jättebra 😊
+NEJ: Tyvärr kan jag inte just nu, men tack för att du frågade!
+ANNAT: Kan vi prata mer om det? Jag vill gärna hjälpa till!''';
+
+    try {
+      final result = await _sendRequest(input, prompt);
+      
+      // Parsa svaret
+      String yesSuggestion = '';
+      String noSuggestion = '';
+      String otherSuggestion = '';
+      
+      final lines = result.improvedText.split('\n');
+      for (final line in lines) {
+        final trimmedLine = line.trim();
+        if (trimmedLine.toUpperCase().startsWith('JA:')) {
+          yesSuggestion = trimmedLine.substring(3).trim();
+        } else if (trimmedLine.toUpperCase().startsWith('NEJ:')) {
+          noSuggestion = trimmedLine.substring(4).trim();
+        } else if (trimmedLine.toUpperCase().startsWith('ANNAT:')) {
+          otherSuggestion = trimmedLine.substring(6).trim();
+        }
+      }
+      
+      return SuggestionResult(
+        originalText: input,
+        yesSuggestion: yesSuggestion,
+        noSuggestion: noSuggestion,
+        otherSuggestion: otherSuggestion,
+        success: true,
+      );
+    } catch (e) {
+      return SuggestionResult(
+        originalText: input,
+        yesSuggestion: '',
+        noSuggestion: '',
+        otherSuggestion: '',
+        success: false,
+        errorMessage: e.toString(),
+      );
+    }
   }
 
   /// Skickar request till Gemini API
@@ -189,4 +261,27 @@ class GeminiException implements Exception {
 
   @override
   String toString() => message;
+}
+
+class SuggestionResult {
+  final String originalText;
+  final String yesSuggestion;
+  final String noSuggestion;
+  final String otherSuggestion;
+  final bool success;
+  final String? errorMessage;
+
+  SuggestionResult({
+    required this.originalText,
+    required this.yesSuggestion,
+    required this.noSuggestion,
+    required this.otherSuggestion,
+    required this.success,
+    this.errorMessage,
+  });
+
+  bool get hasSuggestions => 
+      yesSuggestion.isNotEmpty || 
+      noSuggestion.isNotEmpty || 
+      otherSuggestion.isNotEmpty;
 }
