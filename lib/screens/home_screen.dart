@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../database/db_helper.dart';
 import '../models/work_entry.dart';
+import '../models/report.dart';
+import '../services/report_service.dart';
 import '../utils/pdf_generator.dart';
 import 'add_entry_screen.dart';
 import 'customer_history_screen.dart';
+import 'admin_reports_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,79 +18,57 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final DbHelper _dbHelper = DbHelper.instance;
-  List<WorkEntry> _entries = [];
+  final ReportService _reportService = ReportService.instance;
+  
+  ActiveReportData? _activeReportData;
   bool _isLoading = true;
-  DateTime _selectedMonth = DateTime.now();
+  int _adminTapCount = 0;
+  DateTime? _lastAdminTap;
 
   // Svenska veckodagar
   final List<String> _weekDays = [
-    'Mån',
-    'Tis',
-    'Ons',
-    'Tor',
-    'Fre',
-    'Lör',
-    'Sön'
-  ];
-
-  // Svenska månader
-  final List<String> _monthNames = [
-    '',
-    'Januari',
-    'Februari',
-    'Mars',
-    'April',
-    'Maj',
-    'Juni',
-    'Juli',
-    'Augusti',
-    'September',
-    'Oktober',
-    'November',
-    'December'
+    'Mån', 'Tis', 'Ons', 'Tor', 'Fre', 'Lör', 'Sön'
   ];
 
   @override
   void initState() {
     super.initState();
-    _loadEntries();
+    _loadActiveReport();
   }
 
-  Future<void> _loadEntries() async {
+  Future<void> _loadActiveReport() async {
     setState(() {
       _isLoading = true;
     });
 
-    final entries = await _dbHelper.getWorkEntriesForMonth(
-      _selectedMonth.year,
-      _selectedMonth.month,
-    );
+    final data = await _reportService.getActiveReportData();
 
     setState(() {
-      _entries = entries;
+      _activeReportData = data;
       _isLoading = false;
     });
   }
 
-  double get _totalHours {
-    return _entries.fold(0, (sum, entry) => sum + entry.hours);
-  }
+  List<WorkEntry> get _entries => _activeReportData?.entries ?? [];
 
-  void _previousMonth() {
-    setState(() {
-      _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month - 1);
-    });
-    _loadEntries();
-  }
+  double get _totalHours => _activeReportData?.totalHours ?? 0;
 
-  void _nextMonth() {
-    setState(() {
-      _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month + 1);
-    });
-    _loadEntries();
-  }
+  String get _dateRange => _activeReportData?.dateRange ?? 'Inga arbetspass';
+
+  bool get _canSubmit => _entries.isNotEmpty;
 
   Future<void> _navigateToAddEntry({WorkEntry? entry}) async {
+    // Check if report is submitted (shouldn't happen but safety check)
+    if (_activeReportData?.report.isSubmitted == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Kan inte redigera en skickad rapport'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -96,11 +77,22 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     if (result == true) {
-      _loadEntries();
+      _loadActiveReport();
     }
   }
 
   Future<void> _deleteEntry(WorkEntry entry) async {
+    // Check if report is submitted
+    if (_activeReportData?.report.isSubmitted == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Kan inte ta bort från en skickad rapport'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -132,13 +124,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (confirmed == true && entry.id != null) {
       await _dbHelper.deleteWorkEntry(entry.id!);
-      _loadEntries();
+      _loadActiveReport();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Arbetspasset borttaget',
-                style: TextStyle(fontSize: 16)),
+            content: Text('Arbetspasset borttaget', style: TextStyle(fontSize: 16)),
             backgroundColor: Colors.orange,
           ),
         );
@@ -146,12 +137,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _generatePdf() async {
-    if (_entries.isEmpty) {
+  Future<void> _submitReport() async {
+    if (!_canSubmit) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text(
-            'Inga arbetspass att exportera för denna månad',
+            'Lägg till arbetspass innan du skickar rapporten',
             style: TextStyle(fontSize: 16),
           ),
           backgroundColor: Colors.orange.shade600,
@@ -160,55 +151,204 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    try {
-      await PdfGenerator.generateAndSharePdf(
-        _entries,
-        _selectedMonth.year,
-        _selectedMonth.month,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Kunde inte skapa PDF: $e',
-                style: const TextStyle(fontSize: 16)),
-            backgroundColor: Colors.red.shade600,
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange.shade700, size: 32),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Skicka rapport?',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'När rapporten skickas låses den och kan inte ändras.',
+              style: TextStyle(fontSize: 18),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Sammanfattning:',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue.shade800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '• $_dateRange',
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                  Text(
+                    '• ${_entries.length} arbetspass',
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                  Text(
+                    '• ${_totalHours.toStringAsFixed(1)} timmar totalt',
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Avbryt', style: TextStyle(fontSize: 18)),
           ),
-        );
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.send),
+            label: const Text('Skicka', style: TextStyle(fontSize: 18)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green.shade600,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        // Generate and share PDF first
+        await PdfGenerator.generateAndSendReportEmail(_entries);
+
+        // Mark report as submitted and create new one
+        await _reportService.submitActiveReport();
+
+        // Reload to show the new empty report
+        await _loadActiveReport();
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.white),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Rapport skickad! En ny rapport har skapats.',
+                      style: TextStyle(fontSize: 16),
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.green.shade600,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Kunde inte skicka rapport: $e',
+                  style: const TextStyle(fontSize: 16)),
+              backgroundColor: Colors.red.shade600,
+            ),
+          );
+        }
       }
     }
   }
 
-  Future<void> _sendEmail() async {
-    if (_entries.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-            'Inga arbetspass att skicka för denna månad',
-            style: TextStyle(fontSize: 16),
-          ),
-          backgroundColor: Colors.orange.shade600,
-        ),
-      );
-      return;
+  void _handleTitleTap() {
+    final now = DateTime.now();
+    
+    // Reset counter if more than 2 seconds since last tap
+    if (_lastAdminTap != null && now.difference(_lastAdminTap!).inSeconds > 2) {
+      _adminTapCount = 0;
     }
+    
+    _lastAdminTap = now;
+    _adminTapCount++;
+    
+    if (_adminTapCount >= 5) {
+      _adminTapCount = 0;
+      _openAdminPanel();
+    }
+  }
 
-    try {
-      await PdfGenerator.generateAndSendEmail(
-        _entries,
-        _selectedMonth.year,
-        _selectedMonth.month,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Kunde inte skicka e-post: $e',
-                style: const TextStyle(fontSize: 16)),
-            backgroundColor: Colors.red.shade600,
+  Future<void> _openAdminPanel() async {
+    // Show PIN dialog first
+    final pinController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Admin-åtkomst'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Ange PIN-kod för att öppna admin-panelen'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: pinController,
+              keyboardType: TextInputType.number,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'PIN-kod',
+                border: OutlineInputBorder(),
+              ),
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Avbryt'),
           ),
-        );
-      }
+          ElevatedButton(
+            onPressed: () {
+              // PIN is 1234 (simple for now, can be changed)
+              if (pinController.text == '1234') {
+                Navigator.pop(context, true);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Fel PIN-kod'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+            child: const Text('Öppna'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => const AdminReportsScreen(),
+        ),
+      ).then((_) => _loadActiveReport());
     }
   }
 
@@ -218,9 +358,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'JobbTimmar',
-          style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+        title: GestureDetector(
+          onTap: _handleTitleTap,
+          child: const Text(
+            'JobbTimmar',
+            style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+          ),
         ),
         backgroundColor: Colors.blue.shade700,
         foregroundColor: Colors.white,
@@ -241,21 +384,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     builder: (context) => const CustomerHistoryScreen(),
                   ),
                 );
-              } else if (value == 'pdf') {
-                _generatePdf();
               }
             },
             itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'pdf',
-                child: Row(
-                  children: [
-                    Icon(Icons.picture_as_pdf, color: Colors.red),
-                    SizedBox(width: 12),
-                    Text('Skapa PDF', style: TextStyle(fontSize: 16)),
-                  ],
-                ),
-              ),
               const PopupMenuItem(
                 value: 'customers',
                 child: Row(
@@ -272,9 +403,9 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // Månadsväljare
+          // Active Report Header
           Container(
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
             decoration: BoxDecoration(
               color: Colors.blue.shade50,
               boxShadow: [
@@ -286,38 +417,39 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Column(
               children: [
-                IconButton(
-                  icon: Icon(Icons.chevron_left,
-                      size: 40, color: Colors.blue.shade700),
-                  onPressed: _previousMonth,
-                ),
-                Column(
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
+                    Icon(Icons.description, color: Colors.blue.shade700, size: 28),
+                    const SizedBox(width: 8),
                     Text(
-                      '${_monthNames[_selectedMonth.month]} ${_selectedMonth.year}',
+                      'Aktiv rapport',
                       style: TextStyle(
-                        fontSize: 24,
+                        fontSize: 22,
                         fontWeight: FontWeight.bold,
                         color: Colors.blue.shade800,
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${_entries.length} pass • ${_totalHours.toStringAsFixed(1)} timmar',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.blue.shade600,
-                      ),
-                    ),
                   ],
                 ),
-                IconButton(
-                  icon: Icon(Icons.chevron_right,
-                      size: 40, color: Colors.blue.shade700),
-                  onPressed: _nextMonth,
+                const SizedBox(height: 4),
+                Text(
+                  _dateRange,
+                  style: TextStyle(
+                    fontSize: 18,
+                    color: Colors.blue.shade700,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${_entries.length} pass • ${_totalHours.toStringAsFixed(1)} timmar',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.blue.shade600,
+                  ),
                 ),
               ],
             ),
@@ -336,7 +468,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 size: 80, color: Colors.grey.shade400),
                             const SizedBox(height: 16),
                             Text(
-                              'Inga arbetspass denna månad',
+                              'Inga arbetspass i rapporten',
                               style: TextStyle(
                                 fontSize: 20,
                                 color: Colors.grey.shade600,
@@ -384,9 +516,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                       child: Column(
                                         children: [
                                           Text(
-                                            entry.date.day.toString(),
+                                            '${entry.date.day}/${entry.date.month}',
                                             style: TextStyle(
-                                              fontSize: 24,
+                                              fontSize: 20,
                                               fontWeight: FontWeight.bold,
                                               color: Colors.blue.shade800,
                                             ),
@@ -453,25 +585,25 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
           ),
 
-          // Sammanställning och PDF-knapp
-          if (_entries.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.3),
-                    spreadRadius: 1,
-                    blurRadius: 5,
-                    offset: const Offset(0, -2),
-                  ),
-                ],
-              ),
-              child: SafeArea(
-                child: Column(
-                  children: [
-                    // Summering
+          // Submit button at bottom
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.3),
+                  spreadRadius: 1,
+                  blurRadius: 5,
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
+            child: SafeArea(
+              child: Column(
+                children: [
+                  // Summering (only show if there are entries)
+                  if (_entries.isNotEmpty) ...[
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
@@ -486,7 +618,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Totalt denna månad',
+                                'Totalt i rapporten',
                                 style: TextStyle(
                                   fontSize: 16,
                                   color: Colors.green.shade700,
@@ -513,33 +645,35 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
+                  ],
 
-                    // PDF-knapp
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: _generatePdf,
-                        icon: const Icon(Icons.picture_as_pdf, size: 28),
-                        label: const Text(
-                          'Skapa & dela PDF-rapport',
-                          style: TextStyle(
-                              fontSize: 20, fontWeight: FontWeight.bold),
+                  // Submit button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _canSubmit ? _submitReport : null,
+                      icon: const Icon(Icons.send, size: 28),
+                      label: const Text(
+                        'Skicka rapport',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _canSubmit 
+                            ? Colors.green.shade600 
+                            : Colors.grey.shade400,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue.shade700,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          elevation: 3,
-                        ),
+                        elevation: _canSubmit ? 3 : 0,
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
+          ),
         ],
       ),
     );

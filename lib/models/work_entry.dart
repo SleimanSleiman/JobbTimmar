@@ -3,12 +3,14 @@ class WorkEntry {
   final DateTime date;
   final String customer;
   final double hours;
+  final int? reportId; // Foreign key to report
 
   WorkEntry({
     this.id,
     required this.date,
     required this.customer,
     required this.hours,
+    this.reportId,
   });
 
   Map<String, dynamic> toMap() {
@@ -17,6 +19,7 @@ class WorkEntry {
       'date': date.toIso8601String(),
       'customer': customer,
       'hours': hours,
+      'report_id': reportId,
     };
   }
 
@@ -26,6 +29,7 @@ class WorkEntry {
       date: DateTime.parse(map['date'] as String),
       customer: map['customer'] as String,
       hours: (map['hours'] as num).toDouble(),
+      reportId: map['report_id'] as int?,
     );
   }
 
@@ -34,12 +38,14 @@ class WorkEntry {
     DateTime? date,
     String? customer,
     double? hours,
+    int? reportId,
   }) {
     return WorkEntry(
       id: id ?? this.id,
       date: date ?? this.date,
       customer: customer ?? this.customer,
       hours: hours ?? this.hours,
+      reportId: reportId ?? this.reportId,
     );
   }
 }

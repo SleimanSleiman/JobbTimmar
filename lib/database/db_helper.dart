@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/work_entry.dart';
 import '../models/customer_history.dart';
+import '../models/report.dart';
 
 class DbHelper {
   static final DbHelper instance = DbHelper._init();
@@ -21,18 +22,31 @@ class DbHelper {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2, // Increased version for migration
       onCreate: _createDB,
+      onUpgrade: _upgradeDB,
     );
   }
 
   Future<void> _createDB(Database db, int version) async {
+    // Create reports table first
+    await db.execute('''
+      CREATE TABLE reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT NOT NULL,
+        submitted_at TEXT,
+        is_submitted INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+
     await db.execute('''
       CREATE TABLE work_entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         date TEXT NOT NULL,
         customer TEXT NOT NULL,
-        hours REAL NOT NULL
+        hours REAL NOT NULL,
+        report_id INTEGER,
+        FOREIGN KEY (report_id) REFERENCES reports(id)
       )
     ''');
 
@@ -42,16 +56,175 @@ class DbHelper {
         name TEXT NOT NULL UNIQUE
       )
     ''');
+
+    // Create initial active report
+    await db.insert('reports', {
+      'created_at': DateTime.now().toIso8601String(),
+      'is_submitted': 0,
+    });
   }
 
-  // Work Entry methods
+  Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Migration from version 1 to 2
+      // Create reports table
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS reports (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at TEXT NOT NULL,
+          submitted_at TEXT,
+          is_submitted INTEGER NOT NULL DEFAULT 0
+        )
+      ''');
+
+      // Add report_id column to work_entries if it doesn't exist
+      try {
+        await db.execute('ALTER TABLE work_entries ADD COLUMN report_id INTEGER');
+      } catch (e) {
+        // Column might already exist
+      }
+
+      // Create initial active report
+      final reportId = await db.insert('reports', {
+        'created_at': DateTime.now().toIso8601String(),
+        'is_submitted': 0,
+      });
+
+      // Assign all existing work entries to this report
+      await db.update(
+        'work_entries',
+        {'report_id': reportId},
+        where: 'report_id IS NULL',
+      );
+    }
+  }
+
+  // ==================== REPORT METHODS ====================
+
+  /// Get the current active (non-submitted) report
+  Future<Report?> getActiveReport() async {
+    final db = await database;
+    final result = await db.query(
+      'reports',
+      where: 'is_submitted = 0',
+      limit: 1,
+    );
+    
+    if (result.isEmpty) return null;
+    return Report.fromMap(result.first);
+  }
+
+  /// Create a new active report
+  Future<Report> createNewReport() async {
+    final db = await database;
+    final report = Report.createNew();
+    final id = await db.insert('reports', report.toMap());
+    return report.copyWith(id: id);
+  }
+
+  /// Ensure there's always an active report
+  Future<Report> ensureActiveReport() async {
+    final active = await getActiveReport();
+    if (active != null) return active;
+    return await createNewReport();
+  }
+
+  /// Submit a report (mark as sent)
+  Future<void> submitReport(int reportId) async {
+    final db = await database;
+    await db.update(
+      'reports',
+      {
+        'is_submitted': 1,
+        'submitted_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [reportId],
+    );
+  }
+
+  /// Unlock a submitted report (admin function)
+  Future<void> unlockReport(int reportId) async {
+    final db = await database;
+    await db.update(
+      'reports',
+      {
+        'is_submitted': 0,
+        'submitted_at': null,
+      },
+      where: 'id = ?',
+      whereArgs: [reportId],
+    );
+  }
+
+  /// Get all submitted reports
+  Future<List<Report>> getSubmittedReports() async {
+    final db = await database;
+    final result = await db.query(
+      'reports',
+      where: 'is_submitted = 1',
+      orderBy: 'submitted_at DESC',
+    );
+    return result.map((map) => Report.fromMap(map)).toList();
+  }
+
+  /// Get all reports (both active and submitted)
+  Future<List<Report>> getAllReports() async {
+    final db = await database;
+    final result = await db.query(
+      'reports',
+      orderBy: 'created_at DESC',
+    );
+    return result.map((map) => Report.fromMap(map)).toList();
+  }
+
+  /// Get a report by ID
+  Future<Report?> getReportById(int id) async {
+    final db = await database;
+    final result = await db.query(
+      'reports',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (result.isEmpty) return null;
+    return Report.fromMap(result.first);
+  }
+
+  // ==================== WORK ENTRY METHODS ====================
+  
+  /// Insert a work entry into the active report
   Future<int> insertWorkEntry(WorkEntry entry) async {
     final db = await database;
+    
+    // Ensure there's an active report
+    final activeReport = await ensureActiveReport();
+    
+    // Attach to active report
+    final entryWithReport = entry.copyWith(reportId: activeReport.id);
     
     // Spara kund i historiken automatiskt
     await insertCustomerIfNotExists(entry.customer);
     
-    return await db.insert('work_entries', entry.toMap());
+    return await db.insert('work_entries', entryWithReport.toMap());
+  }
+
+  /// Get all work entries for a specific report
+  Future<List<WorkEntry>> getWorkEntriesForReport(int reportId) async {
+    final db = await database;
+    final result = await db.query(
+      'work_entries',
+      where: 'report_id = ?',
+      whereArgs: [reportId],
+      orderBy: 'date ASC',
+    );
+    return result.map((map) => WorkEntry.fromMap(map)).toList();
+  }
+
+  /// Get all work entries for the active report
+  Future<List<WorkEntry>> getActiveReportEntries() async {
+    final activeReport = await getActiveReport();
+    if (activeReport == null || activeReport.id == null) return [];
+    return await getWorkEntriesForReport(activeReport.id!);
   }
 
   Future<List<WorkEntry>> getAllWorkEntries() async {
