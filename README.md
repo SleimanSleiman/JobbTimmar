@@ -1,45 +1,46 @@
+
 JobbTimmar
 
-JobbTimmar är en enkel app som hjälper dig att hålla koll på dina arbetspass och skapa snygga månadsrapporter. Dessutom har den smarta AI-verktyg som hjälper dig att skriva, översätta och förstå text.
+JobbTimmar is a simple app that helps you track your work sessions and generate polished monthly reports. It also includes smart AI tools to help you write, translate, and understand text.
 
-Vad kan appen göra?
+What the app can do
 
-Håll koll på tiden
-- Enkel registrering: Lägg in datum, kund och antal timmar med några få tryck.
-- Minns dina kunder: Appen kommer ihåg vilka du jobbat hos tidigare så du slipper skriva in samma namn igen.
-- Månadsöversikt: Se direkt hur mycket du jobbat varje månad.
+Time tracking
+- Easy entry: Add date, client, and hours with a few taps.
+- Client memory: The app remembers clients you've worked for so you don't have to re-enter names.
+- Monthly overview: See at a glance how much you've worked each month.
 
-Rapportera
-- PDF-rapporter: Skapa professionella tidrapporter direkt i appen.
-- Dela enkelt: Skicka rapporten via mejl, SMS eller spara den på telefonen.
+Reporting
+- PDF reports: Generate professional time reports directly from the app.
+- Easy sharing: Send reports by email or SMS, or save them to your device.
 
-AI-assistent & Textverktyg
-Appen har inbyggda smarta verktyg som hjälper dig i vardagen:
-- Rätta text: Få hjälp med stavning och grammatik.
-- Förenkla: Gör krångliga texter lättare att förstå.
-- Översätt: Översätt snabbt mellan svenska och arabiska.
-- Prata istället för att skriva: Diktera dina meddelanden och anteckningar.
-- Lyssna på text: Få meddelanden upplästa för dig.
-- Svarsförslag: Få smarta förslag på vad du kan svara på meddelanden.
+AI Assistant & Text Tools
+The app includes built-in smart tools to help you day-to-day:
+- Text correction: Get help with spelling and grammar.
+- Simplify: Make complex text easier to understand.
+- Translate: Quickly translate between Swedish and Arabic.
+- Dictation: Speak instead of typing for notes and messages.
+- Read aloud: Have messages read out loud.
+- Reply suggestions: Get smart suggested replies for messages.
 
-Hur använder jag den?
+How to use
 
-1. Startsidan: Här ser du alla dina arbetspass för månaden. Använd pilarna < > för att byta månad.
-2. Lägg till pass: Tryck på + Nytt pass. Fyll i datum, kund och timmar. Spara.
-3. Skapa rapport: Tryck på knappen Skapa & dela PDF-rapport längst ner på skärmen.
-4. AI-verktyg: Gå till SMS/Text-fliken för att använda de smarta skrivhjälpmedlen.
+1. Home screen: See all your work sessions for the current month. Use the < and > arrows to change months.
+2. Add a session: Tap + New session. Fill in the date, client, and hours, then save.
+3. Create a report: Tap the "Create & share PDF report" button at the bottom of the screen.
+4. AI tools: Go to the SMS/Text tab to use the writing assistants.
 
-Kom igång (För utvecklare)
+Getting started (for developers)
 
-Vill du köra koden själv? Här är det snabba sättet:
+Want to run the code locally? Quick steps:
 
-1. Se till att du har Flutter (https://flutter.dev) installerat.
-2. Hämta koden och öppna mappen i terminalen.
-3. Kör kommandona:
-   
+1. Make sure you have Flutter installed: https://flutter.dev
+2. Clone the repository and open the project folder in a terminal.
+3. Run the commands:
+
    flutter pub get
    flutter run
-   
-OBS: Du behöver en egen secrets.dart fil i lib/config/ med din Gemini API-nyckel för att AI-funktionerna ska fungera.
+
+Note: You need your own `secrets.dart` file in lib/config/ containing your Gemini API key for AI features to work.
 
 
